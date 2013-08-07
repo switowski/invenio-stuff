@@ -1,0 +1,357 @@
+#!/bin/bash
+#
+# Install Invenio in a virtualenv as described on
+# http://invenio-software.org/wiki/Installation/InvenioInVirtualenv
+#
+
+CONFIRM=`[ ${2:-''} == '--yes-i-know' ] && echo 1 || echo 0`
+MYSQL_CMD=mysql.server
+
+#################
+# Configuration #
+#################
+
+
+export CFG_ENV_NAME=$1
+export CFG_ENV_DIR=~/.virtualenvs
+export CFG_INVENIO_PREFIX=${CFG_ENV_DIR}/${CFG_ENV_NAME}
+#export CFG_INVENIO_SRCDIR=~/invenio
+export CFG_INVENIO_SRCDIR_ORIG=~/invenio
+export CFG_INVENIO_SRCDIR=${CFG_INVENIO_PREFIX}/src/invenio
+export CFG_TMP=/tmp/deploy.$$
+
+##########
+# Step 1 #
+##########
+# All prerequsites are installed by provision.sh
+echo " ============================ STEP 1 ================================"
+echo
+echo " >>> Check script variables."
+echo " >>> CFG_ENV_NAME         = $CFG_ENV_NAME"
+echo " >>> CFG_ENV_DIR          = $CFG_ENV_DIR"
+echo " >>> CFG_INVENIO_SRCDIR   = $CFG_INVENIO_SRCDIR"
+echo
+
+
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 2 #
+##########
+
+echo " ============================ STEP 2 ================================"
+echo
+echo " >>> Create and activate new profile."
+echo " >>> CFG_TMP              = $CFG_TMP"
+echo
+
+#
+# Create activate-profile
+#
+mkdir -p $CFG_TMP
+cat > ${CFG_TMP}/activate-profile <<EOF
+export PIP_DOWNLOAD_CACHE=$HOME/.pip/cache
+export PYVER=`python -c "import sys;print '%s.%s' % (sys.version_info[0],sys.version_info[1])"`
+export CFG_INVENIO_SRCDIR=$CFG_INVENIO_SRCDIR
+export CFG_INVENIO_PREFIX=${CFG_ENV_DIR}/${CFG_ENV_NAME}
+export CFG_INVENIO_USER=`whoami`
+export CFG_INVENIO_ADMIN=vagrant@localhost
+# Below only works for vagrant boxes
+export CFG_INVENIO_HOSTNAME=localhost
+export CFG_INVENIO_DOMAINNAME=
+export CFG_INVENIO_PORT_HTTP=4000
+export CFG_INVENIO_PORT_HTTPS=4000
+
+# Database
+export CFG_DATABASE_HOST=localhost
+export CFG_DATABASE_NAME=$CFG_ENV_NAME
+export CFG_DATABASE_USER=$CFG_ENV_NAME
+export CFG_DATABASE_PASS=my123p
+
+# Debugging mail server
+export CFG_MISCUTIL_SMTP_HOST=127.0.0.1
+export CFG_MISCUTIL_SMTP_PORT=1025
+
+# Configuration files (these files are created below)
+export INVENIO_LOCAL=${CFG_TMP}/invenio-local.conf
+export REQUIREMENTS=${CFG_INVENIO_SRCDIR}/requirements.txt
+export REQUIREMENTS_EXTRAS=${CFG_INVENIO_SRCDIR}/requirements-extras.txt
+export REQUIREMENTS_FLASK=${CFG_INVENIO_SRCDIR}/requirements-flask.txt
+export REQUIREMENTS_FLASK_EXT=${CFG_INVENIO_SRCDIR}/requirements-flask-ext.txt
+
+alias mi="${CFG_INVENIO_PREFIX}/bin/invenio-make-install"
+alias kw="${CFG_INVENIO_PREFIX}/bin/invenio-check-kwalitee --check-some"
+
+if [ -e ${CFG_INVENIO_PREFIX}/etc/bash_completion.d/inveniocfg ];
+then
+  . ${CFG_INVENIO_PREFIX}/etc/bash_completion.d/inveniocfg
+fi
+
+(which register-python-argcomplete >/dev/null) && eval "$(register-python-argcomplete 'inveniomanage')"
+EOF
+
+# Run it
+. ${CFG_TMP}/activate-profile
+
+echo " >>> PYVER = $PYVER"
+echo " >>> CFG_INVENIO_PREFIX = $CFG_INVENIO_PREFIX"
+echo
+
+cat ${CFG_TMP}/activate-profile
+
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 3 #
+##########
+
+echo " ============================ STEP 3 ================================"
+echo
+echo " >>> Create config file."
+echo
+
+#
+# invenio-local.conf
+#
+mkdir -p `dirname $INVENIO_LOCAL`
+cat > $INVENIO_LOCAL <<EOF
+[Invenio]
+CFG_BIBSCHED_PROCESS_USER = $CFG_INVENIO_USER
+CFG_DATABASE_HOST = $CFG_DATABASE_HOST
+CFG_DATABASE_PORT = 3306
+CFG_DATABASE_NAME = $CFG_DATABASE_NAME
+CFG_DATABASE_USER = $CFG_DATABASE_USER
+CFG_DATABASE_PASS = $CFG_DATABASE_PASS
+CFG_SITE_URL = http://$CFG_INVENIO_HOSTNAME:$CFG_INVENIO_PORT_HTTP
+
+# For production environments, change http to https in next line
+CFG_SITE_SECURE_URL = http://$CFG_INVENIO_HOSTNAME:$CFG_INVENIO_PORT_HTTPS
+CFG_SITE_ADMIN_EMAIL = $CFG_INVENIO_ADMIN
+CFG_SITE_SUPPORT_EMAIL = $CFG_INVENIO_ADMIN
+CFG_SITE_NAME = Atlantis Fictive Institute of Science
+CFG_SITE_NAME_INTL_fr = Atlantis Institut des Sciences Fictives
+
+# Next two is only for runnning a debugging mail server
+CFG_MISCUTIL_SMTP_HOST = $CFG_MISCUTIL_SMTP_HOST
+CFG_MISCUTIL_SMTP_PORT = $CFG_MISCUTIL_SMTP_PORT
+CFG_DEVEL_SITE = 0
+CFG_SITE_EMERGENCY_EMAIL_ADDRESSES = {'*': '$CFG_INVENIO_ADMIN'}
+
+# Use memory cache for full site functionality.
+CFG_FLASK_CACHE_TYPE = redis
+
+# Use websearch cache
+CFG_WEBSEARCH_SEARCH_CACHE_SIZE = 1
+CFG_WEBSEARCH_SEARCH_CACHE_TIMEOUT = 600
+
+# Enable serving static files
+CFG_FLASK_SERVE_STATIC_FILES = 1
+CFG_DEVEL_TEST_DATABASE_ENGINES = {'SQLite': {'engine': 'sqlite+pysqlite', 'username': None, 'password': None, 'host': None, 'database': None}}
+EOF
+
+echo
+
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 4 #
+##########
+echo " ============================ STEP 4 ================================"
+echo
+echo " >>> Using CFG_INVENIO_PREFIX = $CFG_INVENIO_PREFIX"
+echo
+
+
+# Remove any previous installations (take care)
+#sudo rm -Rf $CFG_INVENIO_PREFIX
+#rm -Rf $CFG_INVENIO_PREFIX
+
+# Create virtual environment
+
+mkdir -p `dirname $CFG_INVENIO_PREFIX`
+cd `dirname $CFG_INVENIO_PREFIX`
+#virtualenv -p /opt/local/bin/python2.7 `basename $CFG_INVENIO_PREFIX`
+virtualenv `basename $CFG_INVENIO_PREFIX`
+
+#mkvirtualenv $CFG_ENV_NAME
+
+
+# Activate it
+cat ${CFG_TMP}/activate-profile >> $CFG_INVENIO_PREFIX/bin/activate
+
+. `basename $CFG_INVENIO_PREFIX`/bin/activate
+cd $CFG_INVENIO_PREFIX
+
+#workon $CFG_ENV_NAME
+#cdvirtualenv
+
+echo
+echo " >>> PWD `pwd`"
+echo " >>> $ . `basename $CFG_INVENIO_PREFIX`/bin/activate"
+echo " >>> $CFG_INVENIO_PREFIX"
+echo " >>> $CFG_INVENIO_SRCDIR_ORIG"
+echo " >>> $CFG_INVENIO_SRCDIR"
+echo
+
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+cd $CFG_INVENIO_PREFIX
+wget -O bin/git-new-workdir "http://repo.or.cz/w/git.git/blob_plain/HEAD:/contrib/workdir/git-new-workdir"
+chmod +x bin/git-new-workdir
+echo " >>> Checking files ..."
+git-new-workdir $CFG_INVENIO_SRCDIR_ORIG $CFG_INVENIO_SRCDIR
+
+cd $CFG_INVENIO_SRCDIR
+ls
+
+echo
+
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 5 #
+##########
+echo " ============================ STEP 5 ================================"
+echo
+echo " >>> Using REQUIREMENTS = $REQUIREMENTS"
+echo " >>> Using REQUIREMENTS_EXTRAS = $REQUIREMENTS_EXTRAS"
+echo " >>> Using REQUIREMENTS_FLASK = $REQUIREMENTS_FLASK"
+echo " >>> Using REQUIREMENTS_FLASK_EXT = $REQUIREMENTS_FLASK_EXT"
+echo
+
+pip install -r $REQUIREMENTS
+pip install -r $REQUIREMENTS_EXTRAS
+pip install -r $REQUIREMENTS_FLASK
+pip install -r $REQUIREMENTS_FLASK_EXT
+
+# Open Office
+# FIXME
+#cp  `find /usr/ -name uno.py 2>/dev/null | head -n 1` $VIRTUAL_ENV/lib/python$PYVER/site-packages/
+#cp ` find /usr/ -name unohelper.py 2>/dev/null | head -n 1` $VIRTUAL_ENV/lib/python$PYVER/site-packages/
+
+echo
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 6 #
+##########
+
+echo " ============================ STEP 6 ================================"
+# Set the MySQL user which have access to create the database and user.
+echo
+echo -n " >>> Installing MySQL Database ... "
+
+export MYSQL_ADMIN_USER=root
+export MYSQL_ADMIN_PASS=qwerty
+
+# Create database
+mysql -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS -e "DROP DATABASE IF EXISTS $CFG_DATABASE_NAME"
+mysql -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS -h $CFG_DATABASE_HOST -e "CREATE DATABASE IF NOT EXISTS $CFG_DATABASE_NAME DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci"
+# Create user and grant access to database.
+mysql -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS -h $CFG_DATABASE_HOST -e "GRANT ALL PRIVILEGES ON $CFG_DATABASE_USER.* TO $CFG_DATABASE_NAME@localhost IDENTIFIED BY '$CFG_DATABASE_PASS'"
+mysqladmin -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS flush-privileges
+
+echo "[OK]"
+
+echo
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 7 #
+##########
+
+echo " ============================ STEP 7 ================================"
+echo
+echo " >>> CFG_INVENIO_SRCDIR = $CFG_INVENIO_SRCDIR"
+echo " >>> $ aclocal && automake --add-missing && autoconf"
+
+cd $CFG_INVENIO_SRCDIR
+# OS X version:
+aclocal $ACLOCAL_FLAGS && automake --add-missing && autoconf
+# Linux version:
+#aclocal && automake --add-missing && autoconf
+
+echo
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 8 #
+##########
+
+echo " ============================ STEP 8 ================================"
+echo
+echo " >>> CFG_INVENIO_SRCDIR = $CFG_INVENIO_SRCDIR"
+echo " >>> CFG_INVENIO_PREFIX = $CFG_INVENIO_PREFIX"
+echo
+
+cd $CFG_INVENIO_SRCDIR
+./configure --prefix=$CFG_INVENIO_PREFIX --with-python=$CFG_INVENIO_PREFIX/bin/python
+# Make symlink into the virtualenv's Python site-packages.
+ln -s $CFG_INVENIO_PREFIX/lib/python/invenio $CFG_INVENIO_PREFIX/lib/python$PYVER/site-packages/invenio
+make
+make install
+
+cp $INVENIO_LOCAL $CFG_INVENIO_PREFIX/etc/invenio-local.conf
+inveniocfg --update-all
+inveniocfg --create-secret-key
+inveniocfg --update-all
+#inveniocfg --create-apache-conf
+
+make install-mathjax-plugin
+make install-ckeditor-plugin
+make install-pdfa-helper-files
+make install-jquery-plugins
+make install-bootstrap
+
+#$MYSQL_CMD restart
+
+#mkdir -p $VIRTUAL_ENV/var/tmp/ooffice-tmp-files
+#sudo chown -R nobody $VIRTUAL_ENV/var/tmp/ooffice-tmp-files
+#sudo chmod -R 755 $VIRTUAL_ENV/var/tmp/ooffice-tmp-files
+
+echo
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+##########
+# Step 9 #
+##########
+echo " ============================ STEP 9 ================================"
+echo
+echo " >>> Create demo site and load records."
+echo
+
+inveniomanage database create
+inveniomanage database demosite
+inveniocfg --load-demo-records
+
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+###########
+# Step 10 #
+###########
+echo " ============================ STEP 10 ================================"
+echo
+echo " >>> Having a rest."
+echo " >>> Nothing to do here."
+echo
+
+# Nothing to do here
+[ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
+
+###########
+# Step 11 #
+###########
+
+echo " ============================ STEP 11 ================================"
+echo
+echo " >>> Installing Invenio Devscripts."
+echo " >>> $CFG_INVENIO_PREFIX"
+echo
+
+cd $CFG_INVENIO_PREFIX
+git clone https://github.com/tiborsimko/invenio-devscripts.git
+mv invenio-devscripts/* bin/
+rm -Rf invenio-devscripts
+
+pip install git+git://bitbucket.org/osso/invenio-devserver.git
+
