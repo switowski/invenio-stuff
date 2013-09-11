@@ -98,7 +98,7 @@ MYSQL_ADMIN_PASS=${MYSQL_ADMIN_PASS:=pass}
 
 CFG_INVENIO_VIRTUALENVS=${CFG_INVENIO_VIRTUALENVS:=${WORKON_HOME:=$HOME/.virtualenvs}}
 CFG_INVENIO_PREFIX=${CFG_INVENIO_PREFIX:=${CFG_INVENIO_VIRTUALENVS}/${CFG_INVENIO_VIRTUALENV_NAME}}
-CFG_INVENIO_SRCDIR_ORIG=${CFG_INVENIO_SRCDIR_ORIG:=~/invenio}
+CFG_INVENIO_SRCDIR_ORIG=${CFG_INVENIO_SRCDIR_ORIG:=~/src/invenio}
 CFG_INVENIO_SRCDIR=${CFG_INVENIO_SRCDIR:=${CFG_INVENIO_PREFIX}/src/invenio}
 CFG_INVENIO_HOSTNAME=${CFG_INVENIO_HOSTNAME:=`hostname`}
 CFG_INVENIO_DOMAINNAME=${CFG_INVENIO_DOMAINNAME:=`domainname`}
@@ -106,9 +106,9 @@ CFG_INVENIO_PORT_HTTP=${CFG_INVENIO_PORT_HTTP:=80}
 CFG_INVENIO_PORT_HTTPS=${CFG_INVENIO_PORT_HTTPS:=443}
 CFG_INVENIO_USER=${CFG_INVENIO_USER:=`whoami`}
 CFG_INVENIO_ADMIN=${CFG_INVENIO_ADMIN:=info@invenio-software.org}
-CFG_INVENIO_DATABASE_NAME=${CFG_INVENIO_DATABASE_NAME:=invenio}
+CFG_INVENIO_DATABASE_NAME=${CFG_INVENIO_DATABASE_NAME:=${CFG_INVENIO_VIRTUALENV_NAME}}
 CFG_INVENIO_DATABASE_USER=${CFG_INVENIO_DATABASE_USER:=invenio}
-CFG_INVENIO_DATABASE_PASS=${CFG_INVENIO_DATABASE_PASS:='my123p\$ass'}
+CFG_INVENIO_DATABASE_PASS=${CFG_INVENIO_DATABASE_PASS:='my123p$ass'}
 if [ `uname` == "Darwin" ]
 then
   CFG_INVENIO_APACHECTL=${CFG_INVENIO_APACHECTL:=apachectl}
@@ -348,10 +348,30 @@ echo " >>> Using REQUIREMENTS_FLASK = $REQUIREMENTS_FLASK"
 echo " >>> Using REQUIREMENTS_FLASK_EXT = $REQUIREMENTS_FLASK_EXT"
 echo
 
-pip install -r $REQUIREMENTS
-pip install -r $REQUIREMENTS_EXTRAS
-pip install -r $REQUIREMENTS_FLASK
-pip install -r $REQUIREMENTS_FLASK_EXT
+# FIXME - hack for master branch (without requirements files)
+if [ -f $REQUIREMENTS ]; then
+	echo " >>> Instaling NEXT branch"
+	branch='next'
+	pip install -r $REQUIREMENTS
+	pip install -r $REQUIREMENTS_EXTRAS
+	pip install -r $REQUIREMENTS_FLASK
+	pip install -r $REQUIREMENTS_FLASK_EXT
+else
+	echo " >>> Instaling MASTER branch"
+	branch='master'
+	#REQUIREMENTS
+	pip install MySQL-python==1.2.4 rdflib==2.4.2 reportlab==2.5 'python-dateutil<=1.9999' \
+			python-magic==0.4.2 http://www.reportlab.com/ftp/pyRXP-1.16-daily-unix.tar.gz \
+			http://sourceforge.net/projects/numpy/files/NumPy/1.6.2/numpy-1.6.2.tar.gz \
+			numpy==1.7.0 lxml==3.1.2 mechanize==0.2.5 python-Levenshtein==0.10.2 pyPdf==1.13 PyStemmer==1.3.0 \
+			https://py-editdist.googlecode.com/files/py-editdist-0.3.tar.gz feedparser==5.1.3 \
+			BeautifulSoup==3.2.1 beautifulsoup4==4.1.3 python-twitter==0.8.7 celery==3.0.17 \
+			msgpack-python==0.3.0 pyparsing==1.5.6 requests==1.2.1 \
+			git+git://github.com/romanchyla/workflow.git@e41299579501704b1486c72cc2509a9f82e63ea6
+	#REQUIREMENTS_EXTRA
+	pip install gnuplot-py==1.8 invenio-devserver==0.1 pylint pep8 selenium winpdb mechanize mock \
+			http://sourceforge.net/projects/pychecker/files/pychecker/0.8.19/pychecker-0.8.19.tar.gz/download
+fi
 
 pip install ipython nose ipdb virtualenvwrapper
 
@@ -372,14 +392,14 @@ echo
 echo " >>> Installing MySQL Database ... "
 echo " >>> DROP DATABASE IF EXISTS $CFG_INVENIO_DATABASE_NAME"
 echo " >>> CREATE DATABASE IF NOT EXISTS $CFG_INVENIO_DATABASE_NAME DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci"
-echo " >>> GRANT ALL PRIVILEGES ON $CFG_INVENIO_DATABASE_USER.* TO $CFG_INVENIO_DATABASE_NAME@localhost IDENTIFIED BY '$CFG_INVENIO_DATABASE_PASS'"
+echo " >>> GRANT ALL PRIVILEGES ON $CFG_INVENIO_DATABASE_NAME.* TO $CFG_INVENIO_DATABASE_USER@localhost IDENTIFIED BY '$CFG_INVENIO_DATABASE_PASS'"
 echo
 
 # Create database
 mysql -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS -e "DROP DATABASE IF EXISTS $CFG_INVENIO_DATABASE_NAME"
 mysql -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS -h $CFG_INVENIO_DATABASE_HOST -e "CREATE DATABASE IF NOT EXISTS $CFG_INVENIO_DATABASE_NAME DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci"
 # Create user and grant access to database.
-mysql -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS -h $CFG_INVENIO_DATABASE_HOST -e "GRANT ALL PRIVILEGES ON $CFG_INVENIO_DATABASE_USER.* TO $CFG_INVENIO_DATABASE_NAME@localhost IDENTIFIED BY '$CFG_INVENIO_DATABASE_PASS'"
+mysql -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS -h $CFG_INVENIO_DATABASE_HOST -e "GRANT ALL PRIVILEGES ON $CFG_INVENIO_DATABASE_NAME.* TO $CFG_INVENIO_DATABASE_USER@localhost IDENTIFIED BY '$CFG_INVENIO_DATABASE_PASS'"
 mysqladmin -u $MYSQL_ADMIN_USER --password=$MYSQL_ADMIN_PASS flush-privileges
 
 ## pgrep mysql | xargs kill -9
@@ -438,6 +458,8 @@ make install-ckeditor-plugin
 make install-pdfa-helper-files
 make install-jquery-plugins
 make install-bootstrap
+make install-hogan-plugin
+make install-plupload-plugin
 
 #$MYSQL_CMD restart
 
@@ -455,11 +477,16 @@ echo "${bold} ============================ STEP 10 =============================
 echo
 echo " >>> Create demo site and load records."
 echo
-
-inveniomanage database create
-inveniomanage demosite create
-inveniomanage demosite populate
-inveniomanage bibfield reset
+if [$branch == 'master']; then
+	inveniocfg --create-tables
+	inveniocfg --create-demo-site
+	inveniocfg --load-demo-records
+else
+	inveniomanage database create
+	inveniomanage demosite create
+	inveniomanage demosite populate
+	inveniomanage bibfield reset
+fi
 
 [ $CONFIRM -eq 0 ] && ( echo "Press enter to continue ... (exit ^c)"; read )
 
